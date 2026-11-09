@@ -1,6 +1,6 @@
 // Service worker – aplikace běží celá offline.
 // Při změně souborů zvyš VERSION, aby se v telefonu stáhla nová verze.
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = 'treninkovy-denik-' + VERSION;
 const FILES = [
   './',

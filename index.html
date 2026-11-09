@@ -93,7 +93,7 @@ input,select{font:inherit;color:var(--ink);background:var(--surface);border:1px 
 
 /* Tabs */
 .tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
-.tabs div{max-width:640px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr)}
+.tabs div{max-width:640px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr)}
 .tabs button{height:60px;font:600 1.15rem var(--cond);color:var(--muted);letter-spacing:.02em}
 .tabs button[aria-current="page"]{color:var(--blue);box-shadow:inset 0 3px 0 var(--blue)}
 .seg{display:inline-grid;grid-auto-flow:column;background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:3px;margin-bottom:14px}
@@ -111,6 +111,35 @@ table{width:100%;border-collapse:collapse;font-size:.95rem}
 td,th{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left}
 th{font-weight:600;color:var(--muted);font-size:.85rem}
 .tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:4px 8px}
+
+/* Overview */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;display:grid;gap:10px}
+.card svg{display:block;width:100%;height:auto}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:.85rem;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:0}
+.rec{border-left:4px solid var(--blue);padding:2px 0 2px 10px;display:grid;gap:2px;justify-items:start}
+.rec.warn{border-color:var(--yellow)}
+.rec.good{border-color:var(--green)}
+.rec p{font-size:.95rem}
+.rec .btn{margin-top:6px}
+.gb{display:grid;gap:8px}
+.gb-row{display:grid;grid-template-columns:6.6rem minmax(0,1fr) 2.4rem;gap:8px;align-items:center;font-size:.92rem}
+.gb-row>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gb-track{position:relative;height:18px;background:var(--surface2);border-radius:6px;overflow:hidden}
+.gb-band{position:absolute;top:0;bottom:0;background:var(--done)}
+.gb-bar{position:absolute;left:0;top:4px;bottom:4px;border-radius:4px;background:var(--blue)}
+.gb-bar.ok{background:var(--green)}
+.gb-bar.lo{background:var(--yellow)}
+.gb-v{text-align:right;font-weight:600}
+.pl{display:grid}
+.pl-row{display:grid;grid-template-columns:minmax(0,1fr) 76px 4.4rem;gap:10px;align-items:center;text-align:left;width:100%;padding:9px 0;border-top:1px solid var(--line)}
+.pl-row:first-child{border-top:0}
+.pl-name{font-weight:600;display:grid;min-width:0;line-height:1.25}
+.pl-name .sub,.pl-ch .sub{font-weight:400;font-size:.82rem}
+.spark{width:76px;height:26px;color:var(--muted)}
+.pl-ch{text-align:right;font:700 1.1rem var(--cond);display:grid;color:var(--muted)}
+.spark.up,.pl-ch.up{color:var(--green)}
+.spark.down,.pl-ch.down{color:var(--red)}
 
 /* Plan editor */
 .pday{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;display:grid;gap:12px}
@@ -162,6 +191,7 @@ textarea{font:inherit;color:var(--ink);background:var(--surface2);border:1px sol
 <main id="app"><p class="sub">Načítám…</p></main>
 <nav class="tabs" aria-label="Sekce"><div>
   <button data-act="tab" data-v="train">Trénink</button>
+  <button data-act="tab" data-v="over">Přehled</button>
   <button data-act="tab" data-v="hist">Historie</button>
   <button data-act="tab" data-v="plan">Plán</button>
 </div></nav>
@@ -608,6 +638,175 @@ function vWeeks(){
     <p class="sub" style="margin-top:8px">Týdny začínají pondělím. Partii nastavíš u cviku v Plánu, varianty se počítají k partii hlavního cviku.</p>`;
 }
 
+/* ---------- přehled ---------- */
+const DAY = 864e5;
+const sessVol = s => (s.entries || []).reduce((a, e) => a + (e.sets || []).reduce((b, x) => b + (x.w || 0) * (x.r || 0), 0), 0);
+const fmtVol = v => v >= 1000 ? kg(Math.round(v / 100) / 10) + ' t' : Math.round(v) + ' kg';
+const pct = v => (v > 0.05 ? '+' : v < -0.05 ? '−' : '±') + String(Math.abs(Math.round(v * 10) / 10)).replace('.', ',') + ' %';
+const plural = (n, a, b, c) => n === 1 ? a : n > 1 && n < 5 ? b : c;
+const r1 = v => kg(Math.round(v * 10) / 10);
+// posledních n týdnů (pondělky), nejstarší první, poslední = tento týden
+function weekList(n){ const base = weekStart(new Date()); return Array.from({length:n}, (_, i) => { const d = new Date(base); d.setDate(d.getDate() - 7 * (n - 1 - i)); return d; }); }
+const firstWeekKey = () => S.sessions.length ? wkKey(S.sessions[S.sessions.length - 1].date) : wkKey(new Date());
+const weeksSinceFirst = () => Math.round((weekStart(new Date()) - new Date(firstWeekKey() + 'T00:00:00')) / (7 * DAY)) + 1;
+// dokončené týdny od prvního tréninku (bez probíhajícího a bez deloadů), nejnovější poslední
+function fullWeeks(max){ const fw = firstWeekKey(); return weekList(max + 1).slice(0, -1).map(ymd).filter(k => k >= fw && !S.deloads.includes(k)); }
+function slotGroups(){ const m = {}; S.plan.days.forEach(d => d.exercises.forEach(e => { m[e.id] = e.group || ''; })); return m; }
+const plannedPerWeek = () => S.plan.days.filter(d => d.exercises.length).length;
+
+function groupAvg(){
+  let wks = fullWeeks(4), partial = false;
+  if (!wks.length) { wks = [wkKey(new Date())]; partial = true; }
+  const sg = slotGroups(), tot = {};
+  S.sessions.forEach(s => { if (s.deload || !wks.includes(wkKey(s.date))) return;
+    (s.entries || []).forEach(e => { const g = sg[e.slotId] || 'Nezařazeno'; tot[g] = (tot[g] || 0) + e.sets.length; }); });
+  const planned = new Set(Object.values(sg).filter(Boolean));
+  const groups = [...GROUPS.filter(g => planned.has(g) || tot[g]), ...(tot['Nezařazeno'] ? ['Nezařazeno'] : [])];
+  return {weeks: wks.length, partial, rows: groups.map(g => ({g, v: (tot[g] || 0) / wks.length}))};
+}
+
+function progList(){
+  const now = Date.now(), win = 56 * DAY, names = [], seen = new Set();
+  const add = n => { const k = norm(n); if (n && !seen.has(k)) { seen.add(k); names.push(n); } };
+  S.plan.days.forEach(d => d.exercises.forEach(e => add(e.name)));
+  S.sessions.forEach(s => (s.entries || []).forEach(e => add(e.name)));
+  return names.map(name => {
+    const h = historyFor(name, true).reverse(); // nejstarší první
+    if (!h.length || now - Date.parse(h[h.length - 1].date) > win) return null;
+    // výchozí bod: první záznam v okně, případně poslední před ním (nejvýš 12 týdnů staré)
+    let bi = h.findIndex(x => now - Date.parse(x.date) < win);
+    if (bi > 0 && now - Date.parse(h[bi - 1].date) < 84 * DAY) bi--;
+    const pts = h.slice(bi), base = pts[0], last = pts[pts.length - 1];
+    const m0 = metric(base.sets), m1 = metric(last.sets);
+    return {name, pts: pts.map(x => metric(x.sets)), ch: pts.length >= 2 && m0 > 0 ? (m1 - m0) / m0 * 100 : null,
+      days: Math.round((Date.parse(last.date) - Date.parse(base.date)) / DAY), useW: topW(last.sets) > 0, last: m1};
+  }).filter(Boolean);
+}
+
+function barChart(wks, vals, line, label){
+  const n = wks.length, cur = wkKey(new Date()), mx = Math.max(...vals, line || 0, 1);
+  const W = 600, H = 180, B = 34, T = 8, gap = n > 8 ? 10 : 16, bw = (W - gap * (n - 1)) / n;
+  const Y = v => H - B - v / mx * (H - B - T);
+  const bars = vals.map((v, i) => { const k = ymd(wks[i]), x = i * (bw + gap), y = Math.min(Y(v), v ? H - B - 3 : H - B);
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${(H - B - y).toFixed(1)}" rx="4" fill="${S.deloads.includes(k) ? 'var(--yellow)' : 'var(--blue)'}"${k === cur ? ' opacity=".4"' : ''}/>`
+      + (n <= 6 || i % 2 === (n - 1) % 2 ? `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 8}" font-size="21" fill="var(--muted)" text-anchor="middle">${dShort(wks[i])}</text>` : ''); }).join('');
+  const ln = line ? `<line x1="0" x2="${W}" y1="${Y(line).toFixed(1)}" y2="${Y(line).toFixed(1)}" stroke="var(--ink)" stroke-opacity=".55" stroke-dasharray="7 6" stroke-width="2"/>` : '';
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}"><line x1="0" x2="${W}" y1="${H - B}" y2="${H - B}" stroke="var(--line)"/>${bars}${ln}</svg>`;
+}
+const legend = (line) => `<div class="legend"><span><i style="background:var(--blue);opacity:.4"></i>probíhající týden</span><span><i style="background:var(--yellow)"></i>deload</span>${line ? `<span><i style="height:0;border-top:2px dashed var(--ink);opacity:.6;border-radius:0"></i>${line}</span>` : ''}</div>`;
+
+function volCard(){
+  const wks = weekList(Math.min(12, Math.max(4, weeksSinceFirst())));
+  const vals = wks.map(w => { const k = ymd(w); return S.sessions.filter(s => wkKey(s.date) === k).reduce((a, s) => a + sessVol(s), 0); });
+  const full = fullWeeks(12), fv = full.map(k => vals[wks.findIndex(w => ymd(w) === k)] || 0).filter(v => v > 0);
+  const avg = fv.length ? fv.reduce((a, b) => a + b, 0) / fv.length : 0;
+  return `<section class="card"><h2>Objem po týdnech</h2>
+    <p class="sub">Tento týden <b>${fmtVol(vals[vals.length - 1])}</b>${avg ? ` · průměr týdne s tréninkem <b>${fmtVol(avg)}</b>` : ''}. Objem = váha × opakování ve všech sériích.</p>
+    ${barChart(wks, vals, avg, 'Objem po týdnech')}${legend(avg ? 'průměr' : '')}</section>`;
+}
+
+function groupCard(){
+  const G = groupAvg(); if (!G.rows.length) return '';
+  const mx = Math.max(22, ...G.rows.map(r => r.v)), pc = v => (v / mx * 100).toFixed(1) + '%';
+  return `<section class="card"><h2>Série na partii za týden</h2>
+    <p class="sub">${G.partial ? 'Zatím jen probíhající týden – po prvním celém týdnu tu bude týdenní průměr.' : `Průměr za ${G.weeks === 1 ? 'poslední dokončený týden' : 'poslední ' + G.weeks + ' dokončené týdny'} (bez deloadů).`}</p>
+    <div class="gb">${G.rows.map(r => { const c = G.partial ? '' : r.v < 10 ? 'lo' : r.v > 20 ? '' : 'ok';
+      return `<div class="gb-row"><span>${esc(r.g)}</span><span class="gb-track"><span class="gb-band" style="left:${pc(10)};width:${pc(10)}"></span><span class="gb-bar ${c}" style="width:${pc(r.v)}"></span></span><span class="gb-v">${r1(r.v)}</span></div>`; }).join('')}</div>
+    <p class="sub">Světlé pásmo = 10–20 sérií týdně, běžné doporučení pro růst svalů.${G.partial ? '' : ' Žlutě partie pod 10.'} Partii nastavíš u cviku v Plánu.</p></section>`;
+}
+
+function spark(pts, cls){
+  if (pts.length < 2) return '<span class="spark"></span>';
+  const W = 100, H = 30, mn = Math.min(...pts), mx = Math.max(...pts), sp = (mx - mn) || 1;
+  const P = pts.map((v, i) => `${(3 + i * (W - 6) / (pts.length - 1)).toFixed(1)},${(mn === mx ? H / 2 : H - 3 - (v - mn) / sp * (H - 6)).toFixed(1)}`).join(' ');
+  return `<svg class="spark ${cls}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${P}" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>`;
+}
+function progCard(){
+  const L = progList(); if (!L.length) return '';
+  const span = d => d < 7 ? 'za ' + d + ' ' + plural(d, 'den', 'dny', 'dní') : 'za ' + Math.round(d / 7) + ' ' + plural(Math.round(d / 7), 'týden', 'týdny', 'týdnů');
+  return `<section class="card"><h2>Progres cviků</h2>
+    <p class="sub">Změna odhadu maxima za posledních 8 týdnů (u cviků bez váhy počet opakování), bez deloadů. Klepni na cvik pro detail.</p>
+    <div class="pl">${L.map(p => { const cls = p.ch == null ? '' : p.ch > 1 ? 'up' : p.ch < -1 ? 'down' : '';
+      return `<button class="pl-row" data-act="goprog" data-n="${esc(p.name)}"><span class="pl-name">${esc(p.name)}<span class="sub">${p.useW ? 'odh. max ' + kg(Math.round(p.last * 2) / 2) + ' kg' : p.last + ' opak.'}</span></span>${spark(p.pts, cls)}<span class="pl-ch ${cls}">${p.ch == null ? '–' : pct(p.ch)}<span class="sub">${p.ch == null ? '1 záznam' : span(p.days)}</span></span></button>`; }).join('')}</div></section>`;
+}
+
+function freqCard(){
+  const planned = plannedPerWeek();
+  const wks = weekList(Math.min(8, Math.max(4, weeksSinceFirst())));
+  const cnt = wks.map(w => S.sessions.filter(s => wkKey(s.date) === ymd(w)).length);
+  const full = fullWeeks(4), done = full.reduce((a, k) => a + S.sessions.filter(s => wkKey(s.date) === k).length, 0), target = planned * full.length;
+  const txt = full.length && target
+    ? `Za ${full.length === 1 ? 'poslední týden' : 'poslední ' + full.length + ' týdny'} <b>${done} z ${target}</b> plánovaných tréninků (${Math.round(done / target * 100)} %).`
+    : `Tento týden zatím <b>${cnt[cnt.length - 1]}${planned ? ' z ' + planned : ''}</b> ${plural(planned || cnt[cnt.length - 1], 'trénink', 'tréninky', 'tréninků')}.`;
+  return `<section class="card"><h2>Pravidelnost</h2><p class="sub">${txt}</p>
+    ${barChart(wks, cnt, planned, 'Počet tréninků za týden')}${legend(planned ? 'plán (' + planned + ' týdně)' : '')}</section>`;
+}
+
+function recs(){
+  const R = [], now = Date.now(), dl = isDeloadWeek(new Date());
+  const list = a => a.length <= 3 ? a.join(', ') : a.slice(0, 3).join(', ') + ' a ' + (a.length - 3) + (a.length - 3 < 5 ? ' další' : ' dalších');
+  const dlBtn = '<button class="btn small" data-act="deload" data-v="on">Tento týden deload</button>';
+  // únava: pokles výkonu u více cviků naráz
+  const recent = progList().filter(p => p.pts.length >= 2 && now - Date.parse(historyFor(p.name, true)[0].date) < 14 * DAY);
+  const drops = recent.filter(p => p.pts[p.pts.length - 1] < p.pts[p.pts.length - 2] * 0.98).map(p => p.name);
+  let tired = false;
+  if (!dl && drops.length >= 3 && drops.length >= recent.length * 0.4) {
+    tired = true;
+    R.push({k:'warn', t:'Možná únava', x:`Výkon naposledy klesl u ${drops.length} cviků (${list(drops)}). Zvaž odlehčený týden – lehčí váhy a o sérii méně.`, btn: dlBtn});
+  }
+  if (!dl && !tired && weekStreak() >= 6) R.push({k:'warn', t:'Čas na deload', x:`Trénuješ ${weekStreak()} týdnů v kuse bez odlehčení. Týden s lehčími vahami pomůže regeneraci a dalšímu progresu.`, btn: dlBtn});
+  // stagnace
+  if (!dl) {
+    const st = [];
+    S.plan.days.forEach(d => d.exercises.forEach(e => [e.name, ...(e.alternatives || [])].forEach(n => {
+      const h = historyFor(n, true);
+      if (h.length >= 3 && now - Date.parse(h[0].date) < 42 * DAY && !st.some(x => norm(x) === norm(n)) && suggest(e, n).kind === 'stall') st.push(n);
+    })));
+    if (st.length) R.push({k:'warn', t:'Stagnace', x:`${list(st)} – 3 tréninky bez posunu. Zkus jinou variantu cviku, nebo uber asi 10 % a vrať se nahoru.`});
+  }
+  // vynechávané cviky
+  const missed = [];
+  S.plan.days.forEach(d => { const rs = S.sessions.filter(s => s.dayId === d.id && now - Date.parse(s.date) < 28 * DAY); if (rs.length < 2) return;
+    d.exercises.forEach(e => { if (!rs.some(s => (s.entries || []).some(x => x.slotId === e.id))) missed.push(e.name); }); });
+  if (missed.length) R.push({k:'info', t:'Vynechávané cviky', x:`${list(missed)} – v posledních trénincích daného dne chybí. Pokud je nechceš dělat, uprav Plán; jinak je zkus zařadit hned na začátek.`});
+  // partie
+  const G = groupAvg();
+  const activeWeeks = fullWeeks(4).filter(k => S.sessions.some(s => wkKey(s.date) === k)).length;
+  if (!G.partial && activeWeeks >= 2) {
+    const rows = G.rows.filter(r => r.g !== 'Nezařazeno');
+    const low = rows.filter(r => r.v < 10), high = rows.filter(r => r.v > 20);
+    if (low.length) R.push({k:'info', t:'Málo sérií na partii', x:`Pod 10 sérií týdně: ${list(low.map(r => r.g + ' (' + r1(r.v) + ')'))}. Pro růst se běžně doporučuje aspoň 10 sérií na partii za týden – přidej sérii nebo cvik.`});
+    if (high.length) R.push({k:'info', t:'Hodně sérií na partii', x:`Přes 20 sérií týdně: ${list(high.map(r => r.g + ' (' + r1(r.v) + ')'))}. Nad 20 sérií už přínos roste málo a přibývá únavy.`});
+    const ch = (rows.find(r => r.g === 'Hrudník') || {}).v || 0, za = (rows.find(r => r.g === 'Záda') || {}).v || 0;
+    if (ch > 0 && ch > za * 1.5) R.push({k:'info', t:'Tlaky vs. přítahy', x:`Na hrudník děláš ${r1(ch)} sérií týdně, na záda jen ${r1(za)}. Přidej přítahy – pomůžou i ramenům a držení těla.`});
+  }
+  // pravidelnost
+  const planned = plannedPerWeek(), fw = fullWeeks(2);
+  if (planned && fw.length) {
+    const done = fw.reduce((a, k) => a + S.sessions.filter(s => wkKey(s.date) === k).length, 0), target = planned * fw.length;
+    const per = fw.length === 1 ? 'Minulý týden' : 'Za poslední 2 týdny';
+    if (done >= target) R.push({k:'good', t:'Pravidelnost', x:`${per} jsi dal všech ${target} plánovaných tréninků. Tak dál!`});
+    else R.push({k:'info', t:'Pravidelnost', x:`${per} ${done} z ${target} plánovaných tréninků. Pomáhá mít tréninky pevně v kalendáři – progres stojí hlavně na pravidelnosti.`});
+  }
+  // rekordy a růst
+  const prs = prSet(), prNames = [];
+  S.sessions.filter(s => now - Date.parse(s.date) < 7 * DAY).forEach(s => (s.entries || []).forEach((e, i) => { if (prs.has(s.id + '|' + i) && !prNames.includes(e.name)) prNames.push(e.name); }));
+  if (prNames.length) R.push({k:'good', t:'Nové rekordy tento týden', x: list(prNames) + '.'});
+  const best = progList().filter(p => p.ch != null && p.ch > 3 && p.days >= 7).sort((a, b) => b.ch - a.ch)[0];
+  if (best) R.push({k:'good', t:'Nejvíc roste', x:`${best.name}: ${pct(best.ch)} za ${Math.round(best.days / 7)} ${plural(Math.round(best.days / 7), 'týden', 'týdny', 'týdnů')}.`});
+  if (!R.length) R.push({k:'info', t:'Zatím bez doporučení', x:'Jakmile přibude víc tréninků (aspoň 2–3 týdny), objeví se tu tipy k progresu, objemu a pravidelnosti.'});
+  return R;
+}
+function recsCard(){
+  return `<section class="card"><h2>Doporučení</h2>${recs().map(r => `<div class="rec ${r.k}"><b>${esc(r.t)}</b><p>${esc(r.x)}</p>${r.btn || ''}</div>`).join('')}</section>`;
+}
+
+function vOver(){
+  const head = `<div class="head"><h1>Přehled</h1></div>`;
+  if (!S.sessions.length) return head + `<div class="empty"><p>Po prvním uloženém tréninku tu uvidíš grafy objemu, sérií na partii, progresu a pravidelnosti – a k tomu doporučení.</p></div>`;
+  return head + `<div class="stack">${recsCard()}${volCard()}${groupCard()}${progCard()}${freqCard()}</div>`;
+}
+
 function vPlan(){
   if (!S.planDraft) S.planDraft = clone(S.plan);
   const P = S.planDraft;
@@ -662,7 +861,7 @@ function softRender(){
 function render(){
   S.pending = false;
   if (!S.ready) return;
-  app.innerHTML = S.view === 'train' ? vTrain() : S.view === 'hist' ? vHist() : vPlan();
+  app.innerHTML = S.view === 'train' ? vTrain() : S.view === 'over' ? vOver() : S.view === 'hist' ? vHist() : vPlan();
   overlay.innerHTML = vSheet();
   document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-current', b.dataset.v === S.view ? 'page' : 'false'));
 }
@@ -780,6 +979,7 @@ document.addEventListener('click', async ev => {
       try { await store.saveNotes(nn); render(); toast(v ? 'Poznámka uložena' : 'Poznámka smazána'); }
       catch(e){ toast('Uložení se nepovedlo – zkus to znovu.'); }
       break; }
+    case 'goprog': S.view = 'hist'; S.histTab = 'prog'; S.progName = b.dataset.n; render(); window.scrollTo(0,0); break;
     case 'wkoff': S.wkOff = Math.max(0, S.wkOff + (+b.dataset.d)); render(); break;
     case 'deload': {
       const k = wkKey(new Date());
