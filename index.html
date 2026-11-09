@@ -85,6 +85,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--accent);outline:0}
 .ex-actions button{font-size:.78rem;color:var(--muted);font-weight:600;padding:5px 2px}
 .finish{display:grid;grid-template-columns:1fr 2fr;gap:8px;margin-top:4px}
 
+.wk-bar{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:0 -4px 6px}
+.back{display:inline-flex;align-items:center;gap:2px;height:34px;padding:0 10px 0 4px;color:var(--accent);font-weight:600;font-size:.92rem}
+.back svg,.datepick svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.datepick{position:relative;display:inline-flex;flex-direction:row;align-items:center;gap:6px;height:32px;padding:0 11px;border-radius:99px;background:var(--surface2);color:var(--ink);font-size:.8rem;font-weight:600;text-transform:none;letter-spacing:0}
+.datepick svg{width:16px;height:16px;color:var(--muted)}
+.datepick.past{background:var(--accent);color:var(--on-accent)}.datepick.past svg{color:var(--on-accent)}
+.datepick input{position:absolute;inset:0;opacity:0;width:100%;height:100%;padding:0;border:0;-webkit-appearance:none;appearance:none}
+
 /* Tabs */
 .tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;background:rgba(11,12,15,.88);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
 .tabs div{max-width:640px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr)}
@@ -542,7 +550,12 @@ function vWorkout(){
   const D = S.draft, day = findDay(D.dayId);
   const doneCount = D.items.reduce((a,it) => a + it.sets.filter(s => s.done).length, 0);
   const total = D.items.reduce((a,it) => a + it.sets.length, 0);
-  return `<div class="head"><h1>${esc(D.dayName)}</h1><p class="sub">${dLong(D.startedAt)} · hotovo ${doneCount} z ${total} sérií</p></div>
+  const today = ymd(new Date()), wd = D.date && D.date < today ? D.date : today;
+  const wdTxt = wd === today ? 'Dnes' : new Date(wd + 'T12:00').toLocaleDateString('cs-CZ', {weekday:'short', day:'numeric', month:'numeric'});
+  return `<div class="wk-bar"><button class="back" data-act="back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Zpět</button>
+    <label class="datepick${wd === today ? '' : ' past'}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 10h16M9 3v4M15 3v4"/></svg><span>${wdTxt}</span>
+      <input type="date" id="wdate" value="${wd}" max="${today}" aria-label="Datum tréninku"></label></div>
+  <div class="head"><h1>${esc(D.dayName)}</h1><p class="sub">${wd === today ? '' : 'Zpětný zápis · '}hotovo ${doneCount} z ${total} sérií</p></div>
   ${D.items.some(it => historyFor(it.name, true).length) ? '<div style="margin:-4px 0 14px"><button class="btn small" data-act="aslast" data-i="-1">Vše jako minule</button></div>' : ''}
   <div class="stack">${D.items.map((it, i) => {
     const slot = findSlot(day, it.slotId) || {sets: it.sets.length, repMin: 8, repMax: 12, step: 2.5, name: it.name};
@@ -1135,6 +1148,10 @@ document.addEventListener('click', async ev => {
         if (ps) { ps.alternatives = [...(ps.alternatives||[]), name]; try { await store.savePlan(p); } catch(e){} }
       }
       render(); break; }
+    case 'back': {
+      const touched = D.items.some(it => it.todayNote || it.sets.some(s => s.done));
+      if (touched && !(await askConfirm('Odejít z tréninku bez uložení? Zapsané série se ztratí.', 'Odejít'))) return;
+      S.draft = null; saveDraft(); render(); window.scrollTo(0,0); break; }
     case 'discard': if (await askConfirm('Zahodit rozpracovaný trénink? Zapsané série se neuloží.', 'Zahodit')) { S.draft = null; saveDraft(); render(); } break;
     case 'finish': {
       let entries = D.items.map(it => ({slotId: it.slotId, name: it.name,
@@ -1146,13 +1163,17 @@ document.addEventListener('click', async ev => {
         if (!entries.length) { toast('Není co uložit – vyplň aspoň jednu sérii.'); return; }
       }
       entries.forEach(e => { const it = D.items.find(x => x.slotId === e.slotId && x.name === e.name); if (it && it.todayNote) e.note = it.todayNote; });
-      const sess = {id: 's' + Date.now(), date: new Date().toISOString(), startedAt: D.startedAt, dayId: D.dayId, dayName: D.dayName, entries};
-      if (isDeloadWeek(new Date())) sess.deload = true;
-      const prs = sess.deload ? [] : entries.filter(e => { const h = historyFor(e.name, true);
+      const now = new Date(), past = D.date && D.date < ymd(now);
+      const when = past ? (([y, m, d]) => new Date(y, m - 1, d, now.getHours(), now.getMinutes()))(D.date.split('-').map(Number)) : now;
+      const sess = {id: 's' + Date.now(), date: when.toISOString(), dayId: D.dayId, dayName: D.dayName, entries};
+      if (!past) sess.startedAt = D.startedAt;
+      if (isDeloadWeek(when)) sess.deload = true;
+      const prs = sess.deload ? [] : entries.filter(e => { const h = historyFor(e.name, true).filter(x => x.date < sess.date);
         return h.length && metric(e.sets) > Math.max(...h.map(x => metric(x.sets))) + 1e-9; }).map(e => e.name);
       b.disabled = true;
       try { await store.addSession(sess); S.draft = null; saveDraft(); S.view = 'hist'; S.histTab = 'list'; render(); window.scrollTo(0,0);
-        toast(prs.length ? 'Trénink uložen. Nový rekord: ' + prs.join(', ') : 'Trénink uložen', prs.length ? 6000 : 2600); }
+        const saved = past ? 'Trénink zapsán k ' + dShort(sess.date) : 'Trénink uložen';
+        toast(prs.length ? saved + '. Nový rekord: ' + prs.join(', ') : saved, prs.length ? 6000 : 2600); }
       catch(e){ b.disabled = false; toast('Uložení se nepovedlo – zkus to znovu.'); }
       break; }
     case 'htab': S.histTab = b.dataset.v; S.wkOff = 0; render(); break;
@@ -1241,6 +1262,11 @@ function findSlotIn(p, dayId, sid){ const d = p.days.find(x => x.id === dayId); 
 
 document.addEventListener('input', ev => {
   const t = ev.target;
+  if (t.id === 'wdate' && S.draft) {
+    const v = t.value, today = ymd(new Date());
+    if (v && v < today) S.draft.date = v; else delete S.draft.date;
+    saveDraft(); render(); return;
+  }
   if (t.dataset.f && S.draft) {
     const s = S.draft.items[+t.dataset.i].sets[+t.dataset.s];
     if (t.dataset.f === 'w') s.w = num(t.value); else { const n = num(t.value); s.r = n == null ? null : Math.round(n); }
