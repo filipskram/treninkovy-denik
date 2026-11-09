@@ -141,6 +141,19 @@ th{font-weight:600;color:var(--muted);font-size:.85rem}
 .spark.up,.pl-ch.up{color:var(--green)}
 .spark.down,.pl-ch.down{color:var(--red)}
 
+.bw-list{display:flex;flex-wrap:wrap;gap:6px}
+.bw-list span{display:inline-flex;align-items:center;gap:4px;background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:2px 2px 2px 10px;font-size:.88rem}
+.bw-list button{width:30px;height:30px;color:var(--muted);font-size:1.1rem}
+.sum-nav{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.stat{background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:10px;display:grid;gap:2px;min-width:0}
+.stat b{font:700 1.45rem/1.1 var(--cond);overflow-wrap:anywhere}
+.stat span{font-size:.82rem;color:var(--muted)}
+.pday-when{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) minmax(0,.8fr);gap:8px}
+.cal-form{display:grid;gap:10px}
+.cf-box{max-height:calc(100vh - 40px);overflow:auto}
+.cf-box p.sub{font-size:.9rem;font-weight:400}
+
 /* Plan editor */
 .pday{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;display:grid;gap:12px}
 .pday-top{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
@@ -217,11 +230,12 @@ const LS = {
 };
 
 const S = { plan:{days:[]}, sessions:[], draft:null, view:'train', ready:false,
-            planDraft:null, histTab:'list', progName:null, sheet:null, pending:false, deloads:[], wkOff:0, notes:{} };
+            planDraft:null, histTab:'list', progName:null, sheet:null, pending:false, deloads:[], wkOff:0, notes:{},
+            body:[], sumMode:'m', sumOff:0 };
 const sortSess = () => S.sessions.sort((a,b) => b.date.localeCompare(a.date));
 
 /* ---------- storage (IndexedDB v zařízení, záložně localStorage) ---------- */
-const KEYS = {plan:'wl-plan', sessions:'wl-sessions', deloads:'wl-deloads', notes:'wl-notes'};
+const KEYS = {plan:'wl-plan', sessions:'wl-sessions', deloads:'wl-deloads', notes:'wl-notes', body:'wl-body'};
 const idb = {
   db: null,
   open(){
@@ -265,12 +279,12 @@ const localStore = {
         if (Object.keys(old).length) await idb.setMany(old);
         Object.values(KEYS).forEach((k, i) => { vals[i] = old[k]; });
       }
-      [S.plan, S.sessions, S.deloads, S.notes] = vals;
+      [S.plan, S.sessions, S.deloads, S.notes, S.body] = vals;
     } catch(e) {
       useIdb = false;
-      S.plan = LS.get(KEYS.plan); S.sessions = LS.get(KEYS.sessions); S.deloads = LS.get(KEYS.deloads); S.notes = LS.get(KEYS.notes);
+      S.plan = LS.get(KEYS.plan); S.sessions = LS.get(KEYS.sessions); S.deloads = LS.get(KEYS.deloads); S.notes = LS.get(KEYS.notes); S.body = LS.get(KEYS.body);
     }
-    S.plan = S.plan || {days:[]}; S.sessions = S.sessions || []; S.deloads = S.deloads || []; S.notes = S.notes || {};
+    S.plan = S.plan || {days:[]}; S.sessions = S.sessions || []; S.deloads = S.deloads || []; S.notes = S.notes || {}; S.body = S.body || [];
     sortSess();
   },
   async saveDeloads(d){ await persist({[KEYS.deloads]: d}); S.deloads = d; },
@@ -278,9 +292,10 @@ const localStore = {
   async savePlan(p){ await persist({[KEYS.plan]: p}); S.plan = p; },
   async addSession(s){ const all = [s, ...S.sessions.filter(x => x.id !== s.id)]; await persist({[KEYS.sessions]: all}); S.sessions = all; sortSess(); },
   async deleteSession(id){ const all = S.sessions.filter(x => x.id !== id); await persist({[KEYS.sessions]: all}); S.sessions = all; },
+  async saveBody(b){ b = b.slice().sort((x, y) => x.date.localeCompare(y.date)); await persist({[KEYS.body]: b}); S.body = b; },
   async replaceAll(d){
-    await persist({[KEYS.plan]: d.plan, [KEYS.sessions]: d.sessions, [KEYS.deloads]: d.deloads, [KEYS.notes]: d.notes});
-    S.plan = d.plan; S.sessions = d.sessions; S.deloads = d.deloads; S.notes = d.notes; sortSess();
+    await persist({[KEYS.plan]: d.plan, [KEYS.sessions]: d.sessions, [KEYS.deloads]: d.deloads, [KEYS.notes]: d.notes, [KEYS.body]: d.body});
+    S.plan = d.plan; S.sessions = d.sessions; S.deloads = d.deloads; S.notes = d.notes; S.body = d.body; sortSess();
   }
 };
 const store = localStore;
@@ -288,7 +303,7 @@ const store = localStore;
 /* ---------- záloha ---------- */
 const BACKUP_FORMAT = 'treninkovy-denik-v1';
 function backupData(){
-  return {format: BACKUP_FORMAT, exportedAt: ymd(new Date()), plan: S.plan, sessions: S.sessions, deloads: S.deloads, notes: S.notes};
+  return {format: BACKUP_FORMAT, exportedAt: ymd(new Date()), plan: S.plan, sessions: S.sessions, deloads: S.deloads, notes: S.notes, body: S.body};
 }
 function parseBackup(text){
   let d; try { d = JSON.parse(text); } catch(e){ throw new Error('Soubor není platný JSON.'); }
@@ -302,7 +317,8 @@ function parseBackup(text){
   let notes = {};
   if (Array.isArray(d.notes)) d.notes.forEach(n => { if (n && n.name && n.text) notes[norm(n.name)] = n.text; });
   else if (d.notes && typeof d.notes === 'object') notes = d.notes;
-  return {plan, sessions, deloads, notes, exportedAt: d.exportedAt || ''};
+  const body = Array.isArray(d.body) ? d.body.filter(x => x && /^\d{4}-\d{2}-\d{2}$/.test(x.date) && isFinite(x.kg)).sort((a, b) => a.date.localeCompare(b.date)) : [];
+  return {plan, sessions, deloads, notes, body, exportedAt: d.exportedAt || ''};
 }
 function saveFile(filename, text, mime){
   const blob = new Blob([text], {type: mime});
@@ -311,12 +327,12 @@ function saveFile(filename, text, mime){
   const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   if (standalone && iOS && navigator.canShare) {
     const file = new File([blob], filename, {type: mime});
-    if (navigator.canShare({files: [file]})) return navigator.share({files: [file]}).catch(e => { if (e && e.name !== 'AbortError') throw e; });
+    if (navigator.canShare({files: [file]})) return navigator.share({files: [file]}).then(() => true, e => { if (e && e.name === 'AbortError') return false; throw e; });
   }
   const url = URL.createObjectURL(blob), a = document.createElement('a');
   a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
-  return Promise.resolve();
+  return Promise.resolve(true);
 }
 function pickFile(){
   return new Promise(res => {
@@ -339,6 +355,7 @@ async function restoreBackup(){
   if (!(await askConfirm(msg, hasData ? 'Přepsat' : 'Nahrát'))) return false;
   try {
     await store.replaceAll(d);
+    LS.set('wl-lastBackup', ymd(new Date()));
     if (S.draft && !findDay(S.draft.dayId)) { S.draft = null; saveDraft(); }
     S.planDraft = null; S.progName = null; render(); toast('Záloha obnovena');
     return true;
@@ -487,6 +504,17 @@ function deloadBanner(){
   if (n >= 6) return `<div class="banner"><p><b>${n} týdnů tréninku bez odlehčení.</b> Zvaž deload – týden s lehčími vahami pomůže regeneraci a dalšímu progresu.</p><button class="btn small" data-act="deload" data-v="on">Tento týden deload</button></div>`;
   return '';
 }
+function backupBanner(){
+  if (!S.sessions.length) return '';
+  const today = ymd(new Date()), last = LS.get('wl-lastBackup', null), snooze = LS.get('wl-backupSnooze', null);
+  if (snooze && today < snooze) return '';
+  const newest = ymd(new Date(S.sessions[0].date));
+  if (last && newest <= last) return '';
+  const age = last ? Math.round((new Date(today + 'T12:00') - new Date(last + 'T12:00')) / DAY) : null;
+  if (age != null && age < 14) return '';
+  return `<div class="banner"><p><b>Čas na zálohu.</b> ${age == null ? 'Zatím sis nestáhl žádnou zálohu.' : `Poslední záloha je ${age} dní stará a od té doby přibyly tréninky.`} Data jsou jen v tomto telefonu – zálohu si ulož třeba na iCloud.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small primary" data-act="backup">Stáhnout zálohu</button><button class="btn small" data-act="bsnooze">Později</button></div></div>`;
+}
 function vTrain(){
   if (S.draft) return vWorkout();
   if (!S.plan.days.length) return `
@@ -504,7 +532,7 @@ function vTrain(){
   const tagTxt = !nx ? '' : nx.byWd ? (nx.today ? 'Dnes' : 'Další v týdnu') : 'Na řadě';
   const wdName = WD[todayWd() - 1];
   const subTxt = nx && nx.byWd && !nx.today ? `Dnes (${wdName}) máš podle plánu volno. Trénovat můžeš i tak.` : `Dnes je ${wdName}.`;
-  return `<div class="head"><h1>Trénink</h1><p class="sub">${subTxt}</p></div>${deloadBanner()}
+  return `<div class="head"><h1>Trénink</h1><p class="sub">${subTxt}</p></div>${backupBanner()}${deloadBanner()}
   <div class="stack">${S.plan.days.map(d => {
     const ld = lastDoneOfDay(d.id);
     return `<button class="day${d.id === nxt ? ' next' : ''}" data-act="start" data-id="${d.id}">
@@ -519,6 +547,7 @@ function vWorkout(){
   const doneCount = D.items.reduce((a,it) => a + it.sets.filter(s => s.done).length, 0);
   const total = D.items.reduce((a,it) => a + it.sets.length, 0);
   return `<div class="head"><h1>${esc(D.dayName)}</h1><p class="sub">${dLong(D.startedAt)} · hotovo ${doneCount} z ${total} sérií</p></div>
+  ${D.items.some(it => historyFor(it.name, true).length) ? '<div style="margin:-4px 0 14px"><button class="btn small" data-act="aslast" data-i="-1">Vše jako minule</button></div>' : ''}
   <div class="stack">${D.items.map((it, i) => {
     const slot = findSlot(day, it.slotId) || {sets: it.sets.length, repMin: 8, repMax: 12, step: 2.5, name: it.name};
     const sg = suggest(slot, it.name);
@@ -544,7 +573,7 @@ function vWorkout(){
         </div>`).join('')}
       </div>
       ${it.todayNote ? `<p class="note today">Dnes: ${esc(it.todayNote)}</p>` : ''}
-      <div class="ex-actions"><button data-act="note" data-i="${i}">${S.notes[norm(it.name)] ? 'Upravit trvalou poznámku' : '+ Trvalá poznámka'}</button><button data-act="tnote" data-i="${i}">${it.todayNote ? 'Upravit poznámku k dnešku' : '+ Poznámka k dnešku'}</button><button data-act="addset" data-i="${i}">+ Přidat sérii</button>
+      <div class="ex-actions">${sg.last ? `<button data-act="aslast" data-i="${i}">Jako minule</button>` : ''}<button data-act="note" data-i="${i}">${S.notes[norm(it.name)] ? 'Upravit trvalou poznámku' : '+ Trvalá poznámka'}</button><button data-act="tnote" data-i="${i}">${it.todayNote ? 'Upravit poznámku k dnešku' : '+ Poznámka k dnešku'}</button><button data-act="addset" data-i="${i}">+ Přidat sérii</button>
         ${it.sets.length > 1 ? `<button data-act="rmset" data-i="${i}">− Odebrat sérii</button>` : ''}</div>
     </section>`;
   }).join('')}
@@ -561,7 +590,7 @@ function vHist(){
   if (S.histTab === 'prog') return `<div class="head"><h1>Historie</h1></div>${seg}${vProg()}`;
   if (S.histTab === 'weeks') return `<div class="head"><h1>Historie</h1></div>${seg}${vWeeks()}`;
   const prs = prSet();
-  return `<div class="head"><h1>Historie</h1></div>${seg}
+  return `<div class="head"><h1>Historie</h1></div>${seg}${backupBanner()}
     <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn small" data-act="export">Exportovat do CSV</button>${backupBtns}</div>
     <div class="stack">${S.sessions.map(s => `
     <article class="sess"><div class="sess-top"><h2>${esc(s.dayName)}${s.deload ? ' <span class="dl-tag">deload</span>' : ''}</h2><span class="sub">${dLong(s.date)}</span></div>
@@ -600,9 +629,35 @@ function vProg(){
   return `<label>Cvik<select data-act="progsel">${names.map(n => `<option${norm(n)===norm(S.progName)?' selected':''}>${esc(n)}</option>`).join('')}</select></label>
     <div class="note-row">${S.notes[norm(S.progName)] ? `<p class="note">${esc(S.notes[norm(S.progName)])}</p>` : ''}<button class="btn small" data-act="note">${S.notes[norm(S.progName)] ? 'Upravit poznámku' : '+ Poznámka ke cviku'}</button></div>
     ${chart}
+    ${recTable(S.progName, h, useW)}
+    <h2 class="sec-h">Všechny záznamy</h2>
     <div class="tablewrap"><table><thead><tr><th>Datum</th><th>Série</th><th class="num">${useW ? 'Odh. max' : 'Max opak.'}</th></tr></thead><tbody>
     ${all.map(x => `<tr><td>${dShort(x.date)}${x.deload ? '<br><span class="dl-tag">deload</span>' : ''}</td><td>${esc(fmtSets(x.sets))}${prs.has(x.id + '|' + x.i) ? '<span class="pr">Rekord</span>' : ''}${x.note ? `<span class="enote">${esc(x.note)}</span>` : ''}</td>
       <td class="num">${useW ? kg(Math.round(metric(x.sets) * 2) / 2) + ' kg' : metric(x.sets)}</td></tr>`).join('')}
+    </tbody></table></div>`;
+}
+
+/* rekordy podle počtu opakování: nejtěžší váha, se kterou jsi dal aspoň N opakování */
+const curBody = () => S.body.length ? S.body[S.body.length - 1].kg : null;
+function recTable(name, h, useW){
+  if (!h.length) return '';
+  const day = x => new Date(x).toLocaleDateString('cs-CZ');
+  if (!useW) {
+    let best = null; h.forEach(x => x.sets.forEach(s => { if (!best || s.r > best.r) best = {r: s.r, date: x.date}; }));
+    return `<h2 class="sec-h">Rekord</h2><div class="tablewrap"><table><tbody><tr><td>Nejvíc opakování v sérii</td><td class="num"><b>${best.r}</b></td><td class="num">${day(best.date)}</td></tr></tbody></table></div>`;
+  }
+  const rows = [1, 3, 5, 8, 10, 12, 15].map(n => {
+    let best = null; // h je od nejstaršího, ponecháme první dosažení
+    h.forEach(x => x.sets.forEach(s => { if (s.r >= n && (s.w || 0) > 0 && (!best || s.w > best.w)) best = {w: s.w, r: s.r, date: x.date}; }));
+    return best && {n, ...best};
+  }).filter(Boolean);
+  const dedup = rows.filter((r, k) => !rows.slice(k + 1).some(o => o.w >= r.w)); // vyřaď řádky, které přebíjí víc opakování
+  let e = null; h.forEach(x => x.sets.forEach(s => { const v = e1(s); if (v > 0 && (!e || v > e.v)) e = {v, date: x.date}; }));
+  const bw = curBody();
+  return `<h2 class="sec-h">Rekordy podle opakování</h2>
+    <div class="tablewrap"><table><thead><tr><th>Opakování</th><th class="num">Váha</th><th class="num">Kdy</th></tr></thead><tbody>
+    ${dedup.map(r => `<tr><td>${r.n}${r.r > r.n ? ` <span class="sub">(dal jsi ${r.r})</span>` : ''}</td><td class="num"><b>${kg(r.w)} kg</b></td><td class="num">${day(r.date)}</td></tr>`).join('')}
+    ${e ? `<tr><td>Odhad maxima (1 opak.)</td><td class="num"><b>${kg(Math.round(e.v * 2) / 2)} kg</b>${bw ? `<br><span class="sub">${kg(Math.round(e.v / bw * 100) / 100)}× tvá hmotnost</span>` : ''}</td><td class="num">${day(e.date)}</td></tr>` : ''}
     </tbody></table></div>`;
 }
 
@@ -801,10 +856,147 @@ function recsCard(){
   return `<section class="card"><h2>Doporučení</h2>${recs().map(r => `<div class="rec ${r.k}"><b>${esc(r.t)}</b><p>${esc(r.x)}</p>${r.btn || ''}</div>`).join('')}</section>`;
 }
 
+function bodyCard(){
+  const B = S.body, last = B[B.length - 1];
+  let stat = '<p class="sub">Zapisuj ráno nalačno, ideálně 1–2× týdně. Uvidíš trend a sílu vůči hmotnosti.</p>', chart = '';
+  if (last) {
+    const ref = B.filter(x => x.date <= ymd(new Date(Date.now() - 30 * DAY))).pop();
+    const d = ref ? last.kg - ref.kg : null;
+    stat = `<p class="sub">Aktuálně <b>${kg(last.kg)} kg</b> (${new Date(last.date + 'T12:00').toLocaleDateString('cs-CZ')})${d != null ? ` · za 30 dní <b>${d > 0 ? '+' : d < 0 ? '−' : '±'}${kg(Math.abs(r2(d)))} kg</b>` : ''}</p>`;
+  }
+  if (B.length >= 2) {
+    const pts = B.slice(-60), W = 600, H = 170, P = 40, t0 = Date.parse(pts[0].date), t1 = Date.parse(pts[pts.length - 1].date) || t0 + 1;
+    const vs = pts.map(x => x.kg), mn = Math.min(...vs), mx = Math.max(...vs), sp = (mx - mn) || 1;
+    const X = x => P + (Date.parse(x.date) - t0) / ((t1 - t0) || 1) * (W - P - 10), Y = v => H - 36 - (v - mn) / sp * (H - 54);
+    chart = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Vývoj tělesné hmotnosti">
+      <text x="0" y="${Y(mx) + 6}" fill="var(--muted)" font-size="19">${kg(r2(mx))}</text><text x="0" y="${Y(mn) + 6}" fill="var(--muted)" font-size="19">${kg(r2(mn))}</text>
+      <polyline points="${pts.map(x => X(x).toFixed(1) + ',' + Y(x.kg).toFixed(1)).join(' ')}" fill="none" stroke="var(--blue)" stroke-width="3" stroke-linejoin="round"/>
+      ${pts.map(x => `<circle cx="${X(x).toFixed(1)}" cy="${Y(x.kg).toFixed(1)}" r="4.5" fill="var(--blue)"/>`).join('')}
+      <text x="${P}" y="${H - 4}" fill="var(--muted)" font-size="19">${dShort(pts[0].date + 'T12:00')}</text><text x="${W - 10}" y="${H - 4}" fill="var(--muted)" font-size="19" text-anchor="end">${dShort(pts[pts.length - 1].date + 'T12:00')}</text></svg>`;
+  }
+  const recent = B.slice(-5).reverse();
+  return `<section class="card"><h2>Tělesná hmotnost</h2>${stat}
+    <div class="addrow"><input id="bw-in" inputmode="decimal" placeholder="${last ? kg(last.kg) : 'např. 82,5'} kg" aria-label="Dnešní hmotnost v kg"><button class="btn primary" data-act="bwadd">Zapsat</button></div>
+    ${chart}
+    ${recent.length ? `<div class="bw-list">${recent.map(x => `<span>${new Date(x.date + 'T12:00').toLocaleDateString('cs-CZ')} · <b>${kg(x.kg)} kg</b><button data-act="bwdel" data-d="${x.date}" aria-label="Smazat záznam">×</button></span>`).join('')}</div>` : ''}
+  </section>`;
+}
+
+function sumCard(){
+  const now = new Date(); let from, to, label, pFrom;
+  if (S.sumMode === 'y') { const y = now.getFullYear() - S.sumOff; from = new Date(y, 0, 1); to = new Date(y + 1, 0, 1); pFrom = new Date(y - 1, 0, 1); label = 'Rok ' + y; }
+  else { from = new Date(now.getFullYear(), now.getMonth() - S.sumOff, 1); to = new Date(from.getFullYear(), from.getMonth() + 1, 1); pFrom = new Date(from.getFullYear(), from.getMonth() - 1, 1);
+    label = from.toLocaleDateString('cs-CZ', {month: 'long', year: 'numeric'}); label = label[0].toUpperCase() + label.slice(1); }
+  const inR = (s, a, b) => { const d = new Date(s.date); return d >= a && d < b; };
+  // u probíhajícího období porovnej se stejně dlouhým začátkem předchozího
+  const pTo = S.sumOff ? from : new Date(pFrom.getTime() + (now - from));
+  const ss = S.sessions.filter(s => inR(s, from, to)), prev = S.sessions.filter(s => inR(s, pFrom, pTo));
+  const vol = ss.reduce((a, s) => a + sessVol(s), 0), pvol = prev.reduce((a, s) => a + sessVol(s), 0);
+  let sets = 0, reps = 0; const cnt = {};
+  ss.forEach(s => (s.entries || []).forEach(e => { sets += e.sets.length; reps += e.sets.reduce((a, x) => a + (x.r || 0), 0); cnt[e.name] = (cnt[e.name] || 0) + e.sets.length; }));
+  const prs = prSet(); let prN = 0; ss.forEach(s => (s.entries || []).forEach((e, i) => { if (prs.has(s.id + '|' + i)) prN++; }));
+  const durs = ss.map(s => s.startedAt ? (Date.parse(s.date) - Date.parse(s.startedAt)) / 60000 : 0).filter(m => m >= 10 && m <= 300);
+  const top = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0];
+  const wks = new Set(ss.map(s => wkKey(s.date))).size;
+  const tile = (v, l) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`;
+  const nav = `<div class="sum-nav"><div class="seg" style="margin:0"><button data-act="summode" data-v="m" aria-pressed="${S.sumMode === 'm'}">Měsíc</button><button data-act="summode" data-v="y" aria-pressed="${S.sumMode === 'y'}">Rok</button></div>
+    <span><button class="btn small" data-act="sumoff" data-d="1" aria-label="Předchozí">←</button> <button class="btn small" data-act="sumoff" data-d="-1" aria-label="Další"${S.sumOff ? '' : ' disabled style="opacity:.4"'}>→</button></span></div>`;
+  return `<section class="card"><h2>Souhrn</h2>${nav}<h3>${esc(label)}</h3>
+    ${ss.length ? `<div class="stats">
+      ${tile(ss.length, plural(ss.length, 'trénink', 'tréninky', 'tréninků') + (wks ? ` · ${wks} ${plural(wks, 'týden', 'týdny', 'týdnů')}` : ''))}
+      ${tile(fmtVol(vol), 'objem' + (pvol ? ` · ${pct((vol - pvol) / pvol * 100)} oproti ${S.sumMode === 'y' ? (S.sumOff ? 'předchozímu roku' : 'stejné době loni') : (S.sumOff ? 'předchozímu měsíci' : 'stejné době minulého měsíce')}` : ''))}
+      ${tile(sets, plural(sets, 'série', 'série', 'sérií') + ` · ${reps} opakování`)}
+      ${tile(prN, plural(prN, 'nový rekord', 'nové rekordy', 'nových rekordů'))}
+      ${durs.length ? tile(Math.round(durs.reduce((a, b) => a + b, 0) / durs.length) + ' min', 'průměrná délka tréninku') : ''}
+      ${top ? tile(esc(top[0]), `nejčastější cvik · ${top[1]} ${plural(top[1], 'série', 'série', 'sérií')}`) : ''}
+    </div>` : '<p class="sub">V tomto období není žádný trénink.</p>'}</section>`;
+}
+
 function vOver(){
   const head = `<div class="head"><h1>Přehled</h1></div>`;
-  if (!S.sessions.length) return head + `<div class="empty"><p>Po prvním uloženém tréninku tu uvidíš grafy objemu, sérií na partii, progresu a pravidelnosti – a k tomu doporučení.</p></div>`;
-  return head + `<div class="stack">${recsCard()}${volCard()}${groupCard()}${progCard()}${freqCard()}</div>`;
+  if (!S.sessions.length) return head + `<div class="stack"><div class="empty"><p>Po prvním uloženém tréninku tu uvidíš grafy objemu, sérií na partii, progresu a pravidelnosti – a k tomu doporučení.</p></div>${bodyCard()}</div>`;
+  return head + `<div class="stack">${recsCard()}${sumCard()}${volCard()}${groupCard()}${progCard()}${freqCard()}${bodyCard()}</div>`;
+}
+
+/* ---------- export do kalendáře (.ics) ---------- */
+const CAL_DEF = {time: '17:00', dur: 75};
+const dayTitle = d => { const n = String(d.name || '').trim(), k = WD.find(w => norm(n).startsWith(w));
+  return (k ? n.slice(k.length).replace(/^\s*[–—\-:,]\s*/, '').trim() : n) || n || 'Trénink'; };
+const appUrl = () => location.origin + location.pathname.replace(/index\.html$/, '');
+const icsEsc = s => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+function icsFold(line){
+  const enc = new TextEncoder(), parts = []; let cur = '', n = 0, lim = 75;
+  for (const ch of line) { const b = enc.encode(ch).length; if (n + b > lim) { parts.push(cur); cur = ''; n = 0; lim = 74; } cur += ch; n += b; }
+  parts.push(cur); return parts.join('\r\n ');
+}
+function calRange(period, startIso){
+  const from = new Date(startIso + 'T00:00:00'), to = new Date(from);
+  if (period === 'w') to.setDate(to.getDate() + 7); else if (period === 'm') to.setMonth(to.getMonth() + 1); else to.setFullYear(to.getFullYear() + 1);
+  const days = S.plan.days.filter(d => d.exercises.length && dayWeekday(d)), ev = [];
+  for (const t = new Date(from); t < to; t.setDate(t.getDate() + 1)) {
+    const wd = ((t.getDay() + 6) % 7) + 1;
+    days.filter(d => dayWeekday(d) === wd).forEach(d => ev.push({day: d, date: new Date(t)}));
+  }
+  const last = new Date(to); last.setDate(last.getDate() - 1);
+  return {ev, from, last};
+}
+function buildIcs(ev, rem, loc){
+  const p2 = n => String(n).padStart(2, '0');
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
+  const local = d => `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}T${p2(d.getHours())}${p2(d.getMinutes())}00`;
+  const url = appUrl();
+  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Treninkovy denik//CS', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:Trénink'];
+  ev.forEach(({day, date}) => {
+    const [hh, mm] = (day.time || CAL_DEF.time).split(':').map(Number);
+    const st = new Date(date); st.setHours(hh || 0, mm || 0, 0, 0);
+    const en = new Date(st.getTime() + (day.duration || CAL_DEF.dur) * 60000);
+    const title = '🏋️ ' + dayTitle(day);
+    const desc = day.exercises.map(e => `${e.name} – ${e.sets}× ${e.repMin === e.repMax ? e.repMin : e.repMin + '–' + e.repMax}${(e.alternatives || []).length ? ' (alt.: ' + e.alternatives.join(', ') + ')' : ''}`).join('\n') + `\n\nOtevřít deník: ${url}`;
+    L.push('BEGIN:VEVENT', `UID:${day.id}-${ymd(date).replace(/-/g, '')}@treninkovy-denik`, `DTSTAMP:${stamp}`, `DTSTART:${local(st)}`, `DTEND:${local(en)}`,
+      `SUMMARY:${icsEsc(title)}`, `DESCRIPTION:${icsEsc(desc)}`, `URL:${url}`);
+    if (loc) L.push(`LOCATION:${icsEsc(loc)}`);
+    if (rem > 0) L.push('BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEsc(title)}`, `TRIGGER:-PT${rem}M`, 'END:VALARM');
+    L.push('END:VEVENT');
+  });
+  L.push('END:VCALENDAR');
+  return L.map(icsFold).join('\r\n') + '\r\n';
+}
+function calDialog(){
+  const pref = Object.assign({period: 'm', rem: 60, loc: ''}, LS.get('wl-cal', {}));
+  const noWd = S.plan.days.filter(d => d.exercises.length && !dayWeekday(d)).map(d => d.name);
+  const noTime = S.plan.days.filter(d => d.exercises.length && dayWeekday(d) && !d.time).map(d => d.name);
+  const el = document.createElement('div');
+  el.className = 'cf';
+  el.innerHTML = `<div class="cf-box" role="dialog" aria-modal="true"><h2>Export do kalendáře</h2>
+    <div class="cal-form">
+      <label>Období<select id="cal-p"><option value="w">Týden</option><option value="m">Měsíc</option><option value="y">Rok</option></select></label>
+      <label>Od<input type="date" id="cal-s" value="${ymd(new Date())}"></label>
+      <label>Připomenutí<select id="cal-r"><option value="0">Bez připomenutí</option><option value="15">15 min předem</option><option value="30">30 min předem</option><option value="60">1 hodinu předem</option><option value="120">2 hodiny předem</option></select></label>
+      <label>Místo (nepovinné)<input id="cal-l" value="${esc(pref.loc)}" placeholder="např. posilovna"></label>
+    </div>
+    <p class="sub" id="cal-info"></p>
+    ${noWd.length ? `<p class="sub">Bez dne v týdnu (nebudou v kalendáři): ${esc(noWd.join(', '))}.</p>` : ''}
+    ${noTime.length ? `<p class="sub">Bez nastaveného času – použije se ${CAL_DEF.time}: ${esc(noTime.join(', '))}.</p>` : ''}
+    <div class="cf-btns"><button class="btn" data-cf="0">Zrušit</button><button class="btn primary" data-cf="1">Exportovat</button></div></div>`;
+  const $ = id => el.querySelector('#' + id);
+  $('cal-p').value = pref.period; $('cal-r').value = String(pref.rem);
+  const upd = () => { const r = $('cal-s').value ? calRange($('cal-p').value, $('cal-s').value) : null;
+    $('cal-info').textContent = !r ? 'Vyber datum.' : r.ev.length ? `Vytvoří ${r.ev.length} ${plural(r.ev.length, 'událost', 'události', 'událostí')} (${r.from.toLocaleDateString('cs-CZ')} – ${r.last.toLocaleDateString('cs-CZ')}).` : 'V tomto období nejsou žádné tréninky.'; };
+  el.addEventListener('input', upd); el.addEventListener('change', upd); upd();
+  el.addEventListener('click', e => {
+    e.stopPropagation();
+    const b = e.target.closest('[data-cf]'); if (!b) { if (e.target === el) el.remove(); return; }
+    if (b.dataset.cf === '0') { el.remove(); return; }
+    if (!$('cal-s').value) return;
+    const period = $('cal-p').value, rem = +$('cal-r').value, loc = $('cal-l').value.trim();
+    const r = calRange(period, $('cal-s').value); if (!r.ev.length) { toast('V tomto období nejsou žádné tréninky.'); return; }
+    LS.set('wl-cal', {period, rem, loc});
+    // soubor se musí předat hned v obsluze kliknutí (iOS)
+    saveFile(`treninky-${$('cal-s').value}-${{w: 'tyden', m: 'mesic', y: 'rok'}[period]}.ics`, buildIcs(r.ev, rem, loc), 'text/calendar')
+      .then(ok => { if (ok) { el.remove(); toast('Kalendář připraven – otevři soubor a zvol „Přidat vše“', 5000); } })
+      .catch(() => toast('Export se nepovedl.'));
+  });
+  document.body.appendChild(el);
 }
 
 function vPlan(){
@@ -814,7 +1006,11 @@ function vPlan(){
   <div class="stack">${P.days.map((d, di) => `<section class="pday">
     <div class="pday-top"><input data-p="day" data-di="${di}" value="${esc(d.name)}" aria-label="Název dne">
       <button class="btn small danger" data-act="pdelday" data-di="${di}">Smazat den</button></div>
-    <label>Den v týdnu<select data-p="weekday" data-di="${di}"><option value="">Nepřiřazeno</option>${WD.map((w,k) => `<option value="${k+1}"${dayWeekday(d) === k+1 ? ' selected' : ''}>${w[0].toUpperCase() + w.slice(1)}</option>`).join('')}</select></label>
+    <div class="pday-when">
+      <label>Den v týdnu<select data-p="weekday" data-di="${di}"><option value="">Nepřiřazeno</option>${WD.map((w,k) => `<option value="${k+1}"${dayWeekday(d) === k+1 ? ' selected' : ''}>${w[0].toUpperCase() + w.slice(1)}</option>`).join('')}</select></label>
+      <label>Čas<input type="time" data-p="time" data-di="${di}" value="${esc(d.time || '')}"></label>
+      <label>Délka min<input inputmode="numeric" data-p="dur" data-di="${di}" value="${d.duration || ''}" placeholder="${CAL_DEF.dur}"></label>
+    </div>
     ${d.exercises.map((e, ei) => `<div class="pex">
       <label>Cvik<input data-p="name" data-di="${di}" data-ei="${ei}" value="${esc(e.name)}"></label>
       <div class="pex-grid">
@@ -834,6 +1030,7 @@ function vPlan(){
   </section>`).join('')}
   <button class="btn" data-act="paddday">+ Přidat tréninkový den</button></div>
   <div class="savebar">${planDirty() ? '<button class="btn" data-act="prevert">Zrušit změny</button><button class="btn primary" data-act="psave">Uložit plán</button>' : ''}</div>
+  ${P.days.length ? `<section class="card" style="margin-top:14px"><h2>Kalendář</h2><p class="sub">Přidej tréninky z plánu do kalendáře v telefonu – na týden, měsíc nebo rok dopředu. Čas a délku nastavíš u každého dne výše.</p><div><button class="btn" data-act="calexp">Exportovat do kalendáře</button></div></section>` : ''}
   <p class="mode">Data se ukládají jen v tomto zařízení. Zálohu stáhneš v Historii.</p>`;
 }
 const planDirty = () => S.planDraft && JSON.stringify(S.planDraft) !== JSON.stringify(S.plan);
@@ -953,7 +1150,7 @@ document.addEventListener('click', async ev => {
         if (!entries.length) { toast('Není co uložit – vyplň aspoň jednu sérii.'); return; }
       }
       entries.forEach(e => { const it = D.items.find(x => x.slotId === e.slotId && x.name === e.name); if (it && it.todayNote) e.note = it.todayNote; });
-      const sess = {id: 's' + Date.now(), date: new Date().toISOString(), dayId: D.dayId, dayName: D.dayName, entries};
+      const sess = {id: 's' + Date.now(), date: new Date().toISOString(), startedAt: D.startedAt, dayId: D.dayId, dayName: D.dayName, entries};
       if (isDeloadWeek(new Date())) sess.deload = true;
       const prs = sess.deload ? [] : entries.filter(e => { const h = historyFor(e.name, true);
         return h.length && metric(e.sets) > Math.max(...h.map(x => metric(x.sets))) + 1e-9; }).map(e => e.name);
@@ -988,9 +1185,33 @@ document.addEventListener('click', async ev => {
       catch(e){ toast('Uložení se nepovedlo – zkus to znovu.'); }
       break; }
     case 'backup':
-      try { await saveFile('treninkovy-denik-' + ymd(new Date()) + '.json', JSON.stringify(backupData(), null, 1), 'application/json'); }
+      try { if (await saveFile('treninkovy-denik-' + ymd(new Date()) + '.json', JSON.stringify(backupData(), null, 1), 'application/json')) { LS.set('wl-lastBackup', ymd(new Date())); LS.del('wl-backupSnooze'); render(); } }
       catch(e){ toast('Stažení zálohy se nepovedlo.'); }
       break;
+    case 'bsnooze': { const d = new Date(); d.setDate(d.getDate() + 3); LS.set('wl-backupSnooze', ymd(d)); render(); break; }
+    case 'aslast': {
+      const idx = i < 0 ? D.items.map((_, k) => k) : [i];
+      const its = idx.map(k => D.items[k]).filter(it => historyFor(it.name, true).length);
+      if (!its.length) break;
+      if (its.some(it => it.sets.some(s => s.done)) && !(await askConfirm(i < 0 ? 'Některé série už máš odškrtnuté. Přepsat všechny cviky podle minulého tréninku?' : 'Některé série už máš odškrtnuté. Přepsat je podle minula?', 'Přepsat'))) break;
+      its.forEach(it => { it.sets = historyFor(it.name, true)[0].sets.map(s => ({w: s.w, r: s.r, done: false})); });
+      saveDraft(); render(); toast(i < 0 ? 'Vyplněno podle minulého tréninku' : 'Vyplněno podle minula'); break; }
+    case 'bwadd': {
+      const inp = document.getElementById('bw-in'), v = num(inp && inp.value);
+      if (v == null || v < 25 || v > 350) { toast('Zadej hmotnost v kg, např. 82,5'); break; }
+      const today = ymd(new Date());
+      try { await store.saveBody([...S.body.filter(x => x.date !== today), {date: today, kg: r2(v)}]); render(); toast('Hmotnost zapsána'); }
+      catch(e){ toast('Uložení se nepovedlo – zkus to znovu.'); }
+      break; }
+    case 'bwdel':
+      if (await askConfirm(`Smazat záznam hmotnosti z ${new Date(b.dataset.d + 'T12:00').toLocaleDateString('cs-CZ')}?`, 'Smazat')) {
+        try { await store.saveBody(S.body.filter(x => x.date !== b.dataset.d)); render(); } catch(e){ toast('Smazání se nepovedlo.'); } }
+      break;
+    case 'summode': S.sumMode = b.dataset.v; S.sumOff = 0; render(); break;
+    case 'sumoff': S.sumOff = Math.max(0, S.sumOff + (+b.dataset.d)); render(); break;
+    case 'calexp':
+      if (planDirty()) { toast('Nejdřív ulož změny v plánu.'); break; }
+      calDialog(); break;
     case 'restore': restoreBackup(); break;
     case 'export': {
       const rows = [['Datum','Trénink','Cvik','Série','Váha (kg)','Opakování','Odhad max (kg)','Deload','Poznámka']];
@@ -1033,6 +1254,8 @@ document.addEventListener('input', ev => {
     const d = S.planDraft.days[+t.dataset.di];
     if (t.dataset.p === 'day') d.name = t.value;
     else if (t.dataset.p === 'weekday') d.weekday = t.value === '' ? 0 : +t.value;
+    else if (t.dataset.p === 'time') { if (t.value) d.time = t.value; else delete d.time; }
+    else if (t.dataset.p === 'dur') { const n = num(t.value); if (n) d.duration = Math.round(n); else delete d.duration; }
     else {
       const e = d.exercises[+t.dataset.ei], f = t.dataset.p;
       if (f === 'name') e.name = t.value;
@@ -1049,6 +1272,7 @@ document.addEventListener('change', ev => { if (ev.target.dataset.act === 'progs
 document.addEventListener('keydown', ev => {
   if (ev.key === 'Escape' && S.sheet) { S.sheet = null; render(); }
   if (ev.key === 'Enter' && ev.target.id === 'newvar') document.querySelector('[data-act="addvar"]').click();
+  if (ev.key === 'Enter' && ev.target.id === 'bw-in') { ev.target.blur(); document.querySelector('[data-act="bwadd"]').click(); }
 });
 
 function samplePlan(){
