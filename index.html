@@ -2,7 +2,7 @@
 <html lang="cs">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Tréninkový deník</title>
 <meta name="description" content="Tréninkový deník – plán, série, progres. Data zůstávají jen v zařízení.">
 <link rel="manifest" href="manifest.webmanifest">
@@ -39,7 +39,10 @@
   color-scheme:dark;
 }
 *,*::before,*::after{box-sizing:inherit}
-html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px);touch-action:manipulation;overscroll-behavior:none;scrollbar-width:none}
+html::-webkit-scrollbar,body::-webkit-scrollbar,.tablewrap::-webkit-scrollbar,.sheet::-webkit-scrollbar,.cf-box::-webkit-scrollbar{display:none}
+.tablewrap,.sheet,.cf-box{scrollbar-width:none}
+button,.tabs{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.45 var(--font);-webkit-text-size-adjust:100%}
 #app{max-width:640px;margin:0 auto;padding:16px 14px calc(88px + env(safe-area-inset-bottom,0px))}
 h1{font:700 2.3rem/1 var(--cond);margin:8px 0 4px;letter-spacing:.01em}
@@ -161,6 +164,7 @@ th{font-weight:600;color:var(--muted);font-size:.85rem}
 .pex{border-top:1px solid var(--line);padding-top:12px;display:grid;gap:8px}
 .pex-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
 label{display:grid;gap:3px;font-size:.8rem;color:var(--muted);font-weight:500}
+label input,label select,textarea,#bw-in,#newvar{font-size:1rem}
 .pex-tools{display:flex;gap:4px;justify-content:flex-end}
 .pex-tools button{min-width:36px;height:32px;border-radius:8px;background:var(--surface2);color:var(--muted);font-weight:600}
 .savebar{position:sticky;bottom:calc(70px + env(safe-area-inset-bottom,0px));margin-top:14px;display:flex;gap:10px;justify-content:flex-end;z-index:5}
@@ -1309,6 +1313,8 @@ async function boot(){
   }
 }
 boot();
+// zákaz zvětšování dvěma prsty (iOS ignoruje user-scalable)
+['gesturestart', 'gesturechange', 'gestureend'].forEach(t => document.addEventListener(t, e => e.preventDefault(), {passive: false}));
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
